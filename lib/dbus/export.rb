@@ -23,6 +23,8 @@ module DBus
     # intfs: Hash: String => Interface
     # @@intfs_hash simulates a class attribute by being a hash Class => intfs
     @@intfs_hash = {DBus::Object => nil}
+    # The methods object exports
+    @@methods_hash = {DBus::Object => {}}
     # The service that the object is exported by.
     attr_writer :service
 
@@ -56,6 +58,18 @@ module DBus
       self.class.intfs = param
     end
 
+    def self.exported_methods
+      if self.equal? DBus::Object
+        @@methods_hash[DBus::Object]
+      else
+        (@@methods_hash[self] || {}).merge(self.superclass.exported_methods)
+      end
+    end
+
+    def exported_methods
+      self.class.exported_methods
+    end
+
     # State that the object implements the given _intf_.
     def implements(intf)
       # use a setter
@@ -68,16 +82,25 @@ module DBus
       when Message::METHOD_CALL
         reply = nil
         begin
-          if not self.intfs[msg.interface]
+          if msg.interface and (not self.intfs[msg.interface])
             raise DBus.error("org.freedesktop.DBus.Error.UnknownMethod"),
             "Interface \"#{msg.interface}\" of object \"#{msg.path}\" doesn't exist"
           end
-          meth = self.intfs[msg.interface].methods[msg.member.to_sym]
+          interface = if msg.interface
+                        msg.interface
+                      else
+                        exported_methods[msg.member.to_sym]
+                      end
+          unless interface
+            raise DBus.error("org.freedesktop.DBus.Error.UnknownMethod"),
+              "Method \"#{msg.member}\" of object \"#{msg.path}\" not found on any interface"
+          end
+          meth = self.intfs[interface].methods[msg.member.to_sym]
           if not meth
             raise DBus.error("org.freedesktop.DBus.Error.UnknownMethod"),
             "Method \"#{msg.member}\" on interface \"#{msg.interface}\" of object \"#{msg.path}\" doesn't exist"
           end
-          methname = Object.make_method_name(msg.interface, msg.member)
+          methname = Object.make_method_name(interface, msg.member)
           retdata = method(methname).call(*msg.params)
           retdata =  [*retdata]
 
@@ -117,7 +140,9 @@ module DBus
     def self.dbus_method(sym, protoype = "", &block)
       raise UndefinedInterface, sym if @@cur_intf.nil?
       @@cur_intf.define(Method.new(sym.to_s).from_prototype(protoype))
-      define_method(Object.make_method_name(@@cur_intf.name, sym.to_s), &block) 
+      define_method(Object.make_method_name(@@cur_intf.name, sym.to_s), &block)
+      # register the method in a method list
+      (@@methods_hash[self] ||= {})[sym] = @@cur_intf.name
     end
 
     # Emits a signal from the object with the given _interface_, signal

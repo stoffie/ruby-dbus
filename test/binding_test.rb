@@ -54,4 +54,19 @@ class BindingTest < Test::Unit::TestCase
     assert_equal "org.freedesktop.DBus.Error.Failed", e.name
     assert_equal "failed as designed", e.message
   end
+
+  def test_qdbus
+    # introspection
+    `qdbus --address $DBUS_SESSION_BUS_ADDRESS org.ruby.service /org/ruby/MyInstance`
+    assert_equal $?.exitstatus, 0
+    # method call
+    `qdbus --address $DBUS_SESSION_BUS_ADDRESS org.ruby.service /org/ruby/MyInstance org.ruby.AnotherInterface.Reverse "yao" `
+    assert_equal $?.exitstatus, 0
+    # method call with no interface
+    `qdbus --address $DBUS_SESSION_BUS_ADDRESS org.ruby.service /org/ruby/MyInstance Reverse "yao" `
+    assert_equal $?.exitstatus, 0
+    # method call over a inherited method
+    `qdbus --address $DBUS_SESSION_BUS_ADDRESS org.ruby.service /org/ruby/MyDerivedInstance Reverse "yao" `
+    assert_equal $?.exitstatus, 0
+  end
 end
